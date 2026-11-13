@@ -19,6 +19,8 @@ import {
   searchCorpusTool,
   readCorpusFileTool,
   runSearchCorpusTool,
+  searchCardsTool,
+  runSearchCardsTool,
   runReadCorpusFileTool,
   caselistTools,
   isCaselistTool,
@@ -34,6 +36,7 @@ import {
   hasWebSearch,
 } from "./lib/tools.mjs";
 import { GENERATED_DIR } from "./lib/fileGen.mjs";
+import { searchCards, getCard, cardFacets } from "./lib/cardLibrary.mjs";
 import { bindUser, runWithUser, isValidUserId, USER_DATA_DIR } from "./lib/userContext.mjs";
 import { extractTextFromBuffer, convertDocxToHtml, cleanText } from "./lib/extract.mjs";
 import { transcribeAudio } from "./lib/stt.mjs";
@@ -1030,6 +1033,40 @@ app.use(async (req, res, next) => {
 // Note: OpenCaselist wiki access is no longer a client-facing browser. It is
 // now a coaching capability — Cross reaches the wiki through the caselist_*
 // tools in the /api/chat loop, authenticated with each debater's own token.
+
+// --- Card library -----------------------------------------------------------
+// Individual evidence cards from the public disclosed archive (openCaselist
+// open-source docs). Only single cards are ever returned — never whole case
+// files or their paths. See scripts/lib/cardLibrary.mjs.
+const CARD_FILTER_KEYS = ["side", "season", "cycle", "kind"];
+function cardFilters(q) {
+  const out = {};
+  for (const k of CARD_FILTER_KEYS) {
+    if (typeof q[k] === "string" && q[k] && q[k].length <= 40) out[k] = q[k];
+  }
+  if (q.highlighted === "1") out.highlighted = true;
+  return out;
+}
+
+app.get("/api/cards/search", async (req, res) => {
+  const q = typeof req.query.q === "string" ? req.query.q.slice(0, 300) : "";
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+  const offset = Math.min(5000, Math.max(0, Number(req.query.offset) || 0));
+  res.json(await searchCards(q, { limit, offset, ...cardFilters(req.query) }));
+});
+
+app.get("/api/cards/facets", async (req, res) => {
+  res.json(await cardFacets());
+});
+
+app.get("/api/cards/:id", async (req, res) => {
+  const card = await getCard(req.params.id);
+  if (!card) {
+    res.status(404).json({ error: "Card not found." });
+    return;
+  }
+  res.json(card);
+});
 
 // Reports only a count — corpus file names/paths are private training
 // material and are never exposed to the client (corpus-privacy rule).
@@ -3012,7 +3049,7 @@ app.post("/api/chat", aiGuards, async (req, res) => {
     // account — offering them to an unlinked user would only produce auth
     // failures the model then has to explain, so they're withheld instead and
     // Cross coaches from the corpus alone.
-    const chatTools = [generateFileTool, searchCorpusTool, readCorpusFileTool, lookupJudgeParadigmTool, tabroomJudgeReportTool];
+    const chatTools = [generateFileTool, searchCorpusTool, readCorpusFileTool, searchCardsTool, lookupJudgeParadigmTool, tabroomJudgeReportTool];
     // Live web search for provably time-sensitive facts (current topic wording,
     // recent results) — env-gated, only offered when a search API key is
     // configured (hasWebSearch()). Silent like corpus retrieval: see
@@ -3066,6 +3103,11 @@ app.post("/api/chat", aiGuards, async (req, res) => {
           } else if (call.name === "search_corpus") {
             // Corpus retrieval is silent — nothing is written to the response.
             const result = await runSearchCorpusTool({ input: call.input });
+            results.set(call.id, { content: result.toolResultContent, isError: result.isError });
+          } else if (call.name === "search_cards") {
+            // Public card library: results may be quoted and linked (the
+            // model writes the card into its reply itself).
+            const result = await runSearchCardsTool({ input: call.input });
             results.set(call.id, { content: result.toolResultContent, isError: result.isError });
           } else if (call.name === "read_corpus_file") {
             const result = await runReadCorpusFileTool({ input: call.input });

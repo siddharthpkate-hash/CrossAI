@@ -7,6 +7,8 @@ node_modules/
 scripts/lexical-index.json
 scripts/lexical-index/
 scripts/lexical-index.tmp-*/
+scripts/card-index/
+scripts/card-index.tmp-*/
 incoming/processed/*
 !incoming/processed/.gitkeep
 generated/*
@@ -24,3 +26,4 @@ distill-data/
 delivery-data/*
 !delivery-data/README.md
 node_modules
+scripts/opencaselist-state.json
